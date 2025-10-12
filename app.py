@@ -1,6 +1,7 @@
-   # 标准库
+# 标准库
 import io
 import datetime
+import time
 from PIL import Image
 
 # 第三方库
@@ -46,7 +47,7 @@ if 'analysis_history' not in st.session_state:
     st.session_state.analysis_history = []
 # 侧边栏选中状态
 if 'nav_selected' not in st.session_state:
-    st.session_state.nav_selected = "intro"
+    st.session_state.nav_selected = "项目介绍"
 
 
 def load_sample_data():
@@ -276,6 +277,14 @@ def perform_trajectory_analysis(adata):
         
         plt.tight_layout()
         
+        # 显示各簇的假时间分布
+        st.write("**各簇假时间分布:**")
+        cluster_pseudotime = adata.obs.groupby('louvain')['dpt_pseudotime'].agg(['mean', 'std', 'min', 'max']).round(3)
+        cluster_pseudotime.columns = ['平均假时间', '标准差', '最小假时间', '最大假时间']
+        cluster_pseudotime = cluster_pseudotime.reset_index()
+        cluster_pseudotime.columns = ['簇'] + list(cluster_pseudotime.columns[1:])
+        st.dataframe(cluster_pseudotime)
+        
         # 标记轨迹步骤完成
         update_analysis_step("轨迹推断")
         return fig
@@ -299,114 +308,172 @@ def create_download_button(fig, filename, button_text="下载图片"):
     )
 
 
+# 自定义CSS样式
+st.markdown("""
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+    /* 顶端固定深色栏 */
+    .main-header {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        padding: 0.4rem 2rem;
+        margin: 0;
+        color: white;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 9999;
+        height: 60px;
+        display: flex;
+        align-items: center;
+    }
+    .main-header h1 {
+        font-size: 1.5rem;
+        margin: 0;
+        padding: 0;
+    }
+
+    /* 主内容区防遮挡 */
+    .appview-container {
+        padding-top: 70px !important;
+    }
+
+    /* 侧边栏样式 */
+    .sidebar .sidebar-content {
+        background-color: #f8f9fa;
+        padding-top: 10px !important;
+    }
+
+    /* 主内容卡片 */
+    .main-content {
+        padding: 2rem;
+        background-color: white;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        margin: 1rem 0;
+        line-height: 1.8;
+    }
+
+    /* 步骤按钮样式 */
+    .step-button {
+        width: 100%;
+        margin: 0.5rem 0;
+        padding: 0.75rem;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+    }
+    .step-button:disabled {
+        background-color: #6c757d;
+        cursor: not-allowed;
+    }
+    .step-button.completed {
+        background-color: #28a745;
+    }
+
+    /* 历史记录卡片样式 */
+    .history-card {
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 0.8rem 0;
+        background-color: #f8f9fa;
+    }
+    
+    /* 侧边栏按钮样式 - 简洁现代风格 */
+    .sid-btn {
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        margin: 4px;
+        border: none;
+        border-radius: 8px;
+        background: white;
+        text-align: left;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-size: 13px;
+        color: #333;
+        text-decoration: none;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        border: 1px solid #e0e0e0;
+        flex-grow: 1;
+        min-width: fit-content;
+        justify-content: center;
+    }
+    .sid-btn:hover {
+        background-color: #f0f2f6;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    }
+    .sid-btn.active {
+        background-color: #1e3c72;
+        color: white;
+        font-weight: 600;
+        box-shadow: 0 2px 8px rgba(30, 60, 114, 0.3);
+        border-color: #1e3c72;
+    }
+    .sid-btn i {
+        margin-right: 8px;
+        width: 18px;
+        text-align: center;
+        font-size: 15px;
+    }
+    
+    /* 隐藏radio组件 */
+    [data-testid="stRadio"] {
+        display: none;
+    }
+
+    /* 隐藏radio组件 */
+    [data-testid="stRadio"] {
+        display: none !important;
+    }
+    
+    /* 自定义按钮样式 */
+    .sidebar button {
+        outline: none !important;
+    }
+    
+    .sidebar button:focus {
+        outline: 2px solid #1e3c72 !important;
+        outline-offset: 2px !important;
+    }
+    
+    /* 图标列样式 */
+    .sidebar .stColumn:first-child {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 0 !important;
+        margin-right: -20px !important; /* 进一步减少右侧间距 */
+    }
+    
+    .sidebar .stColumn:first-child .stMarkdown {
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    
+    /* 按钮列样式 */
+    .sidebar .stColumn:last-child {
+        padding: 0 !important;
+        margin-left: -20px !important; /* 进一步减少左侧间距 */
+    }
+    
+    .sidebar .stColumn:last-child .stButton {
+        margin: 0 !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+
 # 主界面
 def main():
-    # 引入Font Awesome并设置自定义样式
-    st.markdown("""
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        /* 顶端固定深色栏 */
-        .main-header {
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-            padding: 0.4rem 2rem;
-            margin: 0;
-            color: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 9999;
-            height: 60px;
-            display: flex;
-            align-items: center;
-        }
-        .main-header h1 {
-            font-size: 1.5rem;
-            margin: 0;
-            padding: 0;
-        }
-
-        /* 主内容区防遮挡 */
-        .appview-container {
-            padding-top: 70px !important;
-        }
-
-        /* 侧边栏样式 */
-        .sidebar .sidebar-content {
-            background-color: #f8f9fa;
-            padding-top: 10px !important;
-        }
-
-        /* 侧边栏图标按钮： hover/active 效果 */
-        .sidebar-icon-btn {
-            display: flex;
-            align-items: center;
-            width: 100%;
-            padding: 0.75rem 1rem;
-            margin: 0.25rem 0;
-            border: none;
-            border-radius: 4px;
-            background: none;
-            text-align: left;
-            cursor: pointer;
-            transition: background-color 0.3s ease;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        }
-        .sidebar-icon-btn:hover {
-            background-color: #e9ecef;
-        }
-        .sidebar-icon-btn i {
-            margin-right: 0.75rem;
-            width: 1.25rem; /* 固定图标宽度，使文字对齐 */
-            text-align: center;
-        }
-        .sidebar-icon-btn.active {
-            background-color: #d1e7dd;
-            font-weight: bold;
-        }
-
-        /* 主内容卡片 */
-        .main-content {
-            padding: 2rem;
-            background-color: white;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            margin: 1rem 0;
-            line-height: 1.8;
-        }
-
-        /* 步骤按钮样式 */
-        .step-button {
-            width: 100%;
-            margin: 0.5rem 0;
-            padding: 0.75rem;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        .step-button:disabled {
-            background-color: #6c757d;
-            cursor: not-allowed;
-        }
-        .step-button.completed {
-            background-color: #28a745;
-        }
-
-        /* 历史记录卡片样式 */
-        .history-card {
-            border: 1px solid #e9ecef;
-            border-radius: 8px;
-            padding: 1rem;
-            margin: 0.8rem 0;
-            background-color: #f8f9fa;
-        }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # 顶端固定标题栏
+    # 顶端固定标题栏（只保留CrOmLineSCNET）
     st.markdown("""
     <div class="main-header">
         <div>
@@ -415,46 +482,130 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
-    # 侧边栏导航 - 修改后的部分
+    # 侧边栏导航
     with st.sidebar:
-        st.markdown("## 🧭 导航菜单")
+        st.markdown("## 导航菜单")
         
-        # 定义导航项
+        # 定义导航项：图标类名、显示名称、对应值
         nav_items = [
-            {"icon": "📊", "label": "项目介绍", "value": "intro"},
-            {"icon": "📁", "label": "上传数据", "value": "upload"},
-            {"icon": "🔬", "label": "分析流程", "value": "pipeline"},
-            {"icon": "🛠️", "label": "分析工具", "value": "tools"},
-            {"icon": "📚", "label": "历史记录", "value": "history"}
+            {"icon": "fa-info-circle", "label": "项目介绍", "value": "项目介绍"},
+            {"icon": "fa-upload", "label": "上传数据", "value": "上传数据"},
+            {"icon": "fa-flask", "label": "分析流程", "value": "分析流程"},
+            {"icon": "fa-tools", "label": "分析工具", "value": "分析工具"},
+            {"icon": "fa-history", "label": "历史记录", "value": "历史记录"}
         ]
         
-        # 创建导航按钮
+        # 使用图标文本 + 按钮的组合布局
         for item in nav_items:
             is_active = st.session_state.nav_selected == item["value"]
-            button_type = "primary" if is_active else "secondary"
             
-            if st.button(
-                f"{item['icon']} {item['label']}",
-                key=f"nav_{item['value']}",
-                use_container_width=True,
-                type=button_type
-            ):
-                st.session_state.nav_selected = item["value"]
-                st.rerun()
-        
-        st.markdown("---")
-        
-        # 数据状态显示
-        st.markdown("### 📋 数据状态")
-        if st.session_state.adata is not None:
-            st.success("✅ 数据已加载")
-            st.write(f"**细胞数:** {st.session_state.adata.n_obs}")
-            st.write(f"**基因数:** {st.session_state.adata.n_vars}")
-        else:
-            st.warning("⚠️ 未加载数据")
+            # 创建两列布局：左侧图标 + 右侧按钮（进一步缩小间距）
+            col1, col2 = st.columns([1, 6])
+            
+            with col1:
+                # 左侧FontAwesome风格图标（颜色固定不变）
+                icon_html = {
+                    "项目介绍": """
+                    <div style="
+                        display: flex; 
+                        align-items: center; 
+                        justify-content: center; 
+                        height: 40px;
+                        font-size: 20px;
+                        font-weight: bold;
+                        color: #333;
+                    ">
+                        ⓘ
+                    </div>
+                    """,
+                    "上传数据": """
+                    <div style="
+                        display: flex; 
+                        align-items: center; 
+                        justify-content: center; 
+                        height: 40px;
+                        font-size: 20px;
+                        font-weight: bold;
+                        color: #333;
+                    ">
+                        ↑
+                    </div>
+                    """,
+                    "分析流程": """
+                    <div style="
+                        display: flex; 
+                        align-items: center; 
+                        justify-content: center; 
+                        height: 40px;
+                        font-size: 20px;
+                        font-weight: bold;
+                        color: #333;
+                    ">
+                        ⚗
+                    </div>
+                    """,
+                    "分析工具": """
+                    <div style="
+                        display: flex; 
+                        align-items: center; 
+                        justify-content: center; 
+                        height: 40px;
+                        font-size: 20px;
+                        font-weight: bold;
+                        color: #333;
+                    ">
+                        ⚒
+                    </div>
+                    """,
+                    "历史记录": """
+                    <div style="
+                        display: flex; 
+                        align-items: center; 
+                        justify-content: center; 
+                        height: 40px;
+                        font-size: 20px;
+                        font-weight: bold;
+                        color: #333;
+                    ">
+                        🕐
+                    </div>
+                    """
+                }
+                
+                st.markdown(icon_html[item['label']], unsafe_allow_html=True)
+            
+            with col2:
+                # 右侧按钮
+                if st.button(
+                    item['label'],
+                    key=f"nav_btn_{item['value']}",
+                    help=f"切换到{item['label']}页面",
+                    use_container_width=True
+                ):
+                    st.session_state.nav_selected = item["value"]
+                    st.rerun()
+                
+                # 按钮样式
+                st.markdown(f"""
+                <style>
+                .stButton > button[key="nav_btn_{item['value']}"] {{
+                    background-color: {'#1e3c72' if is_active else 'white'} !important;
+                    color: {'white' if is_active else '#333'} !important;
+                    font-weight: {'600' if is_active else '400'} !important;
+                    border: 1px solid {'#1e3c72' if is_active else '#e0e0e0'} !important;
+                    box-shadow: {'0 2px 8px rgba(30, 60, 114, 0.3)' if is_active else '0 1px 3px rgba(0,0,0,0.1)'} !important;
+                    height: 40px !important;
+                    font-size: 14px !important;
+                    text-align: center !important;
+                }}
+                .stButton > button[key="nav_btn_{item['value']}"]:hover {{
+                    background-color: {'#2a5298' if is_active else '#f0f2f6'} !important;
+                }}
+                </style>
+                """, unsafe_allow_html=True)
     
-    # 主内容区域 - 保持原样
-    if st.session_state.nav_selected == "intro":
+    # 主内容区域
+    if st.session_state.nav_selected == "项目介绍":
         st.markdown("""
         <div class="main-content">
             <h2>CrOmLineSCNET - 干细胞定向分化驱动因子识别</h2>
@@ -470,7 +621,7 @@ def main():
         </div>
         """, unsafe_allow_html=True)
     
-    elif st.session_state.nav_selected == "upload":
+    elif st.session_state.nav_selected == "上传数据":
         st.markdown("""
         <div class="main-content">
             <h2>📁 数据上传</h2>
@@ -525,8 +676,37 @@ def main():
                         st.session_state.adata = adata
                         st.success("✅ 示例数据加载成功！")
                         st.rerun()
+            
+            # 如果已经加载了数据，显示数据信息
+            if st.session_state.adata is not None:
+                st.success("✅ 数据已加载！")
+                
+                # 显示数据基本信息（与上传数据保持一致）
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("细胞数量", st.session_state.adata.n_obs)
+                with col2:
+                    st.metric("基因数量", st.session_state.adata.n_vars)
+                
+                st.write("**数据形状:**", st.session_state.adata.shape)
+                
+                # 数据预览
+                st.write("**数据预览（前5行5列，仅显示非零值）:**")
+                if hasattr(st.session_state.adata, 'X') and st.session_state.adata.X is not None:
+                    if hasattr(st.session_state.adata.X, 'toarray'):
+                        preview_data = st.session_state.adata.X[:5, :5].toarray()
+                    else:
+                        preview_data = st.session_state.adata.X[:5, :5]
+                    preview_data[preview_data < 1e-6] = 0
+                    st.dataframe(pd.DataFrame(
+                        preview_data.round(3),
+                        index=st.session_state.adata.obs_names[:5],
+                        columns=st.session_state.adata.var_names[:5]
+                    ))
+                else:
+                    st.write("❌ 数据矩阵为空")
     
-    elif st.session_state.nav_selected == "pipeline":
+    elif st.session_state.nav_selected == "分析流程":
         if st.session_state.adata is None:
             st.warning("⚠️ 请先在『上传数据』页面加载数据（本地文件或示例数据）")
         else:
@@ -576,7 +756,7 @@ def main():
                 if st.button("4️⃣ 基因调控网络", disabled=not st.session_state.analysis_completed['trajectory']):
                     st.info("ℹ️ 基因调控网络分析功能正在开发中，预计下一版本上线。")
     
-    elif st.session_state.nav_selected == "tools":
+    elif st.session_state.nav_selected == "分析工具":
         if st.session_state.adata is None:
             st.warning("⚠️ 请先在『上传数据』页面加载数据（本地文件或示例数据）")
         else:
@@ -601,7 +781,7 @@ def main():
                 if st.button("🧬 差异基因分析"):
                     st.info("ℹ️ 差异基因分析功能暂未开放")
     
-    elif st.session_state.nav_selected == "history":
+    elif st.session_state.nav_selected == "历史记录":
         st.markdown("""
         <div class="main-content">
             <h2>📚 分析历史记录</h2>
