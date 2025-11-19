@@ -10,6 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import scanpy as sc
 import streamlit as st
+from scipy import sparse
 
 # 配置与警告
 import warnings
@@ -48,6 +49,9 @@ if 'analysis_history' not in st.session_state:
 # 侧边栏选中状态
 if 'nav_selected' not in st.session_state:
     st.session_state.nav_selected = "项目介绍"
+# 预计算的图像缓存
+if 'hvg_result' not in st.session_state:
+    st.session_state.hvg_result = None
 
 
 def load_sample_data():
@@ -139,35 +143,35 @@ def perform_qc_analysis(adata):
         
         # 第一行：小提琴图
         sc.pl.violin(adata, 'n_genes_by_counts', ax=axes[0,0], jitter=0.4, show=False)
-        axes[0,0].set_title('每个细胞的基因数量', fontsize=14, fontweight='bold')
+        axes[0,0].set_title('Genes per Cell', fontsize=14, fontweight='bold')
         
         sc.pl.violin(adata, 'total_counts', ax=axes[0,1], jitter=0.4, show=False)
-        axes[0,1].set_title('每个细胞的总计数', fontsize=14, fontweight='bold')
+        axes[0,1].set_title('Total Counts per Cell', fontsize=14, fontweight='bold')
         
         sc.pl.violin(adata, 'pct_counts_mt', ax=axes[0,2], jitter=0.4, show=False)
-        axes[0,2].set_title('线粒体基因比例', fontsize=14, fontweight='bold')
+        axes[0,2].set_title('Mitochondrial Gene Percentage', fontsize=14, fontweight='bold')
         
         # 第二行：散点图和最高表达基因
         sc.pl.scatter(adata, x='total_counts', y='pct_counts_mt', ax=axes[1,0], show=False)
-        axes[1,0].set_title('总计数 vs 线粒体基因比例', fontsize=14, fontweight='bold')
+        axes[1,0].set_title('Total Counts vs. Mito (%)', fontsize=14, fontweight='bold')
         
         sc.pl.scatter(adata, x='total_counts', y='n_genes_by_counts', ax=axes[1,1], show=False)
-        axes[1,1].set_title('总计数 vs 基因数量', fontsize=14, fontweight='bold')
+        axes[1,1].set_title('Total Counts vs. Genes', fontsize=14, fontweight='bold')
         
         sc.pl.highest_expr_genes(adata, n_top=20, ax=axes[1,2], show=False)
-        axes[1,2].set_title('最高表达基因', fontsize=14, fontweight='bold')
+        axes[1,2].set_title('Top Expressed Genes', fontsize=14, fontweight='bold')
         
         plt.tight_layout()
         
         # 显示QC统计信息
-        st.write("**QC统计信息:**")
+        st.write("**QC统计信息：**")
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("平均基因数", f"{adata.obs['n_genes_by_counts'].mean():.0f}")
+            st.metric("平均每个细胞的基因数", f"{adata.obs['n_genes_by_counts'].mean():.0f}")
         with col2:
-            st.metric("平均总计数", f"{adata.obs['total_counts'].mean():.0f}")
+            st.metric("平均每个细胞的总计数", f"{adata.obs['total_counts'].mean():.0f}")
         with col3:
-            st.metric("平均线粒体比例", f"{adata.obs['pct_counts_mt'].mean():.2f}%")
+            st.metric("线粒体基因平均占比", f"{adata.obs['pct_counts_mt'].mean():.2f}%")
         
         # 标记QC步骤完成
         update_analysis_step("质量控制")
@@ -223,21 +227,21 @@ def perform_clustering(adata):
         
         # 显示聚类统计信息
         n_clusters = len(adata.obs['louvain'].unique())
-        st.write(f"**聚类结果:** 发现 {n_clusters} 个细胞簇")
+        st.write(f"**聚类概览：** 共识别 {n_clusters} 个细胞簇")
         
         # 显示每个簇的细胞数量
         cluster_counts = adata.obs['louvain'].value_counts().sort_index()
-        st.write("**各簇细胞数量:**")
+        st.write("**各簇的细胞数量：**")
         cluster_df = pd.DataFrame({
-            '簇': cluster_counts.index,
+            '细胞簇': cluster_counts.index,
             '细胞数量': cluster_counts.values
         })
-        st.dataframe(cluster_df)
+        st.dataframe(cluster_df, use_container_width=True)
         
         # 标记聚类步骤完成
         update_analysis_step("细胞聚类")
         return fig, adata
-        
+    
     except Exception as e:
         st.error(f"聚类分析失败: {str(e)}")
         return None, None
@@ -266,24 +270,24 @@ def perform_trajectory_analysis(adata):
         fig, axes = plt.subplots(1, 2, figsize=(20, 8))
         
         sc.pl.umap(adata, color='dpt_pseudotime', ax=axes[0], show=False, cmap='plasma')
-        axes[0].set_title('UMAP上的假时间分布', fontsize=16, fontweight='bold')
+        axes[0].set_title('Pseudotime on UMAP', fontsize=16, fontweight='bold')
         axes[0].set_xlabel('UMAP 1', fontsize=14)
         axes[0].set_ylabel('UMAP 2', fontsize=14)
         
         sc.pl.diffmap(adata, color='dpt_pseudotime', ax=axes[1], show=False, cmap='plasma')
-        axes[1].set_title('扩散映射上的假时间分布', fontsize=16, fontweight='bold')
+        axes[1].set_title('Pseudotime on Diffusion Map', fontsize=16, fontweight='bold')
         axes[1].set_xlabel('Diffusion Component 1', fontsize=14)
         axes[1].set_ylabel('Diffusion Component 2', fontsize=14)
         
         plt.tight_layout()
         
         # 显示各簇的假时间分布
-        st.write("**各簇假时间分布:**")
+        st.write("**各簇的假时间统计：**")
         cluster_pseudotime = adata.obs.groupby('louvain')['dpt_pseudotime'].agg(['mean', 'std', 'min', 'max']).round(3)
-        cluster_pseudotime.columns = ['平均假时间', '标准差', '最小假时间', '最大假时间']
+        cluster_pseudotime.columns = ['平均值', '标准差', '最小值', '最大值']
         cluster_pseudotime = cluster_pseudotime.reset_index()
-        cluster_pseudotime.columns = ['簇'] + list(cluster_pseudotime.columns[1:])
-        st.dataframe(cluster_pseudotime)
+        cluster_pseudotime.columns = ['细胞簇'] + list(cluster_pseudotime.columns[1:])
+        st.dataframe(cluster_pseudotime, use_container_width=True)
         
         # 标记轨迹步骤完成
         update_analysis_step("轨迹推断")
@@ -294,7 +298,216 @@ def perform_trajectory_analysis(adata):
         return None
 
 
-def create_download_button(fig, filename, button_text="下载图片"):
+def perform_hvg_visualization(adata):
+    """高变基因可视化"""
+    try:
+        temp = adata.copy()
+        if sparse.issparse(temp.X):
+            temp.X.data = np.nan_to_num(temp.X.data, nan=0.0, posinf=0.0, neginf=0.0)
+        else:
+            temp.X = np.nan_to_num(temp.X, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        # 确保QC指标存在
+        if 'n_genes_by_counts' not in temp.obs.columns or 'pct_counts_mt' not in temp.obs.columns:
+            temp.var["mt"] = temp.var_names.str.upper().str.startswith("MT-")
+            sc.pp.calculate_qc_metrics(temp, percent_top=None, log1p=False, inplace=True)
+            if 'pct_counts_mt' not in temp.obs.columns:
+                sc.pp.calculate_qc_metrics(temp, qc_vars=["mt"], percent_top=None, log1p=False, inplace=True)
+        sc.pp.filter_cells(temp, min_genes=200)
+        sc.pp.filter_genes(temp, min_cells=3)
+        temp = temp[temp.obs.n_genes_by_counts < 2500, :]
+        temp = temp[temp.obs.pct_counts_mt < 5, :]
+        sc.pp.normalize_total(temp, target_sum=1e4)
+        sc.pp.log1p(temp)
+        try:
+            sc.pp.highly_variable_genes(temp, min_mean=0.0125, max_mean=3, min_disp=0.5)
+        except ValueError as err:
+            if "Bin edges must be unique" in str(err):
+                st.warning("默认的高变基因方法出现分箱问题，正在自动使用 Seurat v3 流程重试。")
+                sc.pp.highly_variable_genes(
+                    temp,
+                    flavor='seurat_v3',
+                    n_top_genes=2000,
+                    span=0.3
+                )
+            else:
+                raise
+        
+        # remove problematic NaN/inf entries for plotting
+        for col in ['means', 'dispersions', 'dispersions_norm']:
+            if col in temp.var.columns:
+                temp.var[col] = temp.var[col].replace([np.inf, -np.inf], np.nan)
+        valid_mask = temp.var[['means', 'dispersions', 'dispersions_norm']].notna().all(axis=1)
+        if valid_mask.sum() == 0:
+            st.warning("由于去除异常值后全部变为缺失，暂无法绘制高变基因散点图。")
+            return None, None
+        if not valid_mask.all():
+            temp = temp[:, temp.var_names[valid_mask]].copy()
+        
+        hv_mask = temp.var['highly_variable'].values.astype(bool)
+        if hv_mask.sum() == 0:
+            st.warning("在当前阈值下没有检测到高变基因，请尝试放宽筛选条件。")
+            return None, None
+        
+        means = temp.var['means'].to_numpy()
+        disp_norm = temp.var['dispersions_norm'].to_numpy()
+        safe_means = np.clip(means, 1e-5, None)
+        
+        fig, ax = plt.subplots(figsize=(10, 7))
+        ax.scatter(
+            safe_means[~hv_mask],
+            disp_norm[~hv_mask],
+            s=8,
+            color="#d3d3d3",
+            alpha=0.5,
+            label="Non-HVG"
+        )
+        ax.scatter(
+            safe_means[hv_mask],
+            disp_norm[hv_mask],
+            s=12,
+            color="#d62728",
+            alpha=0.9,
+            label="HVG"
+        )
+        ax.set_xscale('log')
+        ax.set_xlabel("Mean expression", fontsize=12)
+        ax.set_ylabel("Normalized dispersion", fontsize=12)
+        ax.set_title("Highly Variable Gene Selection", fontsize=16, fontweight='bold')
+        ax.legend()
+        plt.tight_layout()
+        
+        stats = {
+            "total_genes": temp.n_vars,
+            "n_hvg": int(hv_mask.sum())
+        }
+        return fig, stats
+    except Exception as e:
+        st.error(f"高变基因分析失败：{str(e)}")
+        return None, None
+
+
+def perform_cell_annotation(adata, marker_file):
+    """基因marker自动注释细胞类型"""
+    try:
+        if 'louvain' not in adata.obs.columns:
+            st.warning("请先完成细胞聚类，再进行细胞类型注释。")
+            return None, None
+        
+        try:
+            markers_df = pd.read_csv(marker_file, sep=r'\s*,\s*', engine='python', header=0, usecols=[0, 1])
+        except Exception:
+            markers_df = pd.read_csv(marker_file, header=0)
+        if markers_df.shape[1] < 2:
+            st.error("Marker 文件至少需要包含 cell_type 和 markers 两列。")
+            return None, None
+        markers_df = markers_df.iloc[:, :2]
+        markers_df.columns = ['cell_type', 'markers']
+        
+        cell_type_markers = {}
+        for _, row in markers_df.iterrows():
+            if pd.isna(row['cell_type']) or pd.isna(row['markers']):
+                continue
+            genes = [g.strip() for g in str(row['markers']).split(',') if g.strip()]
+            if genes:
+                cell_type_markers[str(row['cell_type']).strip()] = genes
+        
+        valid_markers = {
+            ct: [gene for gene in genes if gene in adata.var_names]
+            for ct, genes in cell_type_markers.items()
+        }
+        valid_markers = {ct: genes for ct, genes in valid_markers.items() if genes}
+        if not valid_markers:
+            st.error("在当前数据中未找到任何有效的 marker 基因。")
+            return None, None
+        
+        cluster_means = {}
+        gene_to_idx = {gene: idx for idx, gene in enumerate(adata.var_names)}
+        for cluster in sorted(adata.obs['louvain'].unique(), key=lambda x: int(x)):
+            mask = adata.obs['louvain'] == cluster
+            subset = adata[mask, :]
+            mean_expr = subset.X.mean(axis=0)
+            if hasattr(mean_expr, "A1"):
+                mean_expr = mean_expr.A1
+            else:
+                mean_expr = np.asarray(mean_expr).ravel()
+            cluster_means[cluster] = mean_expr
+        
+        cluster_scores = {}
+        for cluster, mean_expr in cluster_means.items():
+            scores = {}
+            for cell_type, genes in valid_markers.items():
+                idxs = [gene_to_idx[g] for g in genes]
+                scores[cell_type] = float(np.mean(mean_expr[idxs]))
+            cluster_scores[cluster] = scores
+        
+        cell_type_annot = {cluster: max(scores, key=scores.get) for cluster, scores in cluster_scores.items()}
+        adata.obs['cell_type'] = adata.obs['louvain'].map(cell_type_annot)
+        
+        fig, ax = plt.subplots(figsize=(12, 10))
+        sc.pl.umap(adata, color='cell_type', ax=ax, legend_loc='right margin', show=False)
+        ax.set_title('Cell Type Annotation', fontsize=16, fontweight='bold')
+        plt.tight_layout()
+        
+        summary_rows = []
+        for cluster, scores in cluster_scores.items():
+            sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+            summary_rows.append({
+                "细胞簇": cluster,
+                "预测类型": cell_type_annot[cluster],
+                "最高得分": round(sorted_scores[0][1], 4),
+                "次高类型": sorted_scores[1][0] if len(sorted_scores) > 1 else "-",
+                "次高得分": round(sorted_scores[1][1], 4) if len(sorted_scores) > 1 else "-"
+            })
+        summary_df = pd.DataFrame(summary_rows)
+        
+        return fig, summary_df
+    except Exception as e:
+        st.error(f"细胞类型注释失败：{str(e)}")
+        return None, None
+
+
+def perform_differential_expression(adata, n_genes=20):
+    """差异基因分析可视化"""
+    try:
+        if 'louvain' not in adata.obs.columns:
+            st.warning("请先完成细胞聚类，再进行差异基因分析。")
+            return None, None, None
+        
+        sc.tl.rank_genes_groups(adata, 'louvain', method='wilcoxon', n_genes=n_genes)
+        
+        sc.pl.rank_genes_groups_heatmap(
+            adata,
+            n_genes=n_genes,
+            show_gene_labels=True,
+            use_raw=False,
+            show=False
+        )
+        fig_heatmap = plt.gcf()
+        fig_heatmap.suptitle(f"Top {n_genes} Marker Genes per Cluster", fontsize=16, fontweight='bold')
+        plt.tight_layout()
+        
+        sc.pl.rank_genes_groups(
+            adata,
+            n_genes=5,
+            sharey=False,
+            show=False
+        )
+        fig_summary = plt.gcf()
+        fig_summary.suptitle("Top 5 Marker Genes per Cluster", fontsize=16, fontweight='bold')
+        plt.tight_layout()
+        
+        result = adata.uns['rank_genes_groups']
+        groups = result['names'].dtype.names
+        marker_genes = pd.DataFrame({group: result['names'][group][:5] for group in groups})
+        
+        return fig_heatmap, fig_summary, marker_genes
+    except Exception as e:
+        st.error(f"差异基因分析失败：{str(e)}")
+        return None, None, None
+
+
+def create_download_button(fig, filename, button_text="下载图像"):
     """创建图片下载按钮"""
     buffer = io.BytesIO()
     fig.savefig(buffer, format='png', dpi=300, bbox_inches='tight')
@@ -306,6 +519,82 @@ def create_download_button(fig, filename, button_text="下载图片"):
         file_name=filename,
         mime="image/png"
     )
+
+
+def cache_hvg_plot(adata):
+    """预计算并缓存高变基因图，供按钮快速展示"""
+    if adata is None:
+        st.session_state.hvg_result = None
+        return
+    fig, stats = perform_hvg_visualization(adata)
+    if fig is None:
+        st.session_state.hvg_result = None
+        return
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format='png', dpi=300, bbox_inches='tight')
+    buffer.seek(0)
+    st.session_state.hvg_result = {
+        "fig": fig,
+        "image": buffer.getvalue(),
+        "stats": stats,
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+
+
+def download_cached_image(cache_entry, filename, label):
+    if cache_entry and cache_entry.get("image"):
+        st.download_button(
+            label=label,
+            data=cache_entry["image"],
+            file_name=filename,
+            mime="image/png"
+        )
+
+
+def render_data_preview(adata, window=5):
+    """展示靠近首个非零值的局部数据"""
+    
+    if adata is None or not hasattr(adata, "X") or adata.X is None:
+        st.write("数据矩阵为空。")
+        return
+    X = adata.X
+    n_obs, n_vars = adata.n_obs, adata.n_vars
+    found_nonzero = False
+    if sparse.issparse(X):
+        rows, cols = X.nonzero()
+        if len(rows) > 0:
+            r0, c0 = int(rows[0]), int(cols[0])
+            found_nonzero = True
+    else:
+        arr = np.asarray(X)
+        nz = np.argwhere(arr != 0)
+        if nz.size > 0:
+            r0, c0 = map(int, nz[0])
+            found_nonzero = True
+    if not found_nonzero:
+        r0 = c0 = 0
+    half = max(window // 2, 1)
+    def compute_range(center, length):
+        start = max(center - half, 0)
+        end = min(start + window, length)
+        if end - start < window:
+            start = max(end - window, 0)
+            end = min(start + window, length)
+        return start, end
+    row_start, row_end = compute_range(r0, n_obs)
+    col_start, col_end = compute_range(c0, n_vars)
+    if sparse.issparse(X):
+        submatrix = X[row_start:row_end, col_start:col_end].toarray()
+    else:
+        submatrix = np.asarray(X[row_start:row_end, col_start:col_end])
+    df_preview = pd.DataFrame(
+        np.round(submatrix, 3),
+        index=adata.obs_names[row_start:row_end],
+        columns=adata.var_names[col_start:col_end]
+    )
+    
+    
+    st.dataframe(df_preview, use_container_width=True)
 
 
 # 自定义CSS样式
@@ -641,6 +930,7 @@ def main():
                 if adata is not None:
                     st.session_state.adata = adata
                     st.success("✅ 数据加载成功！")
+                    cache_hvg_plot(adata)
                     
                     # 显示数据基本信息
                     col1, col2 = st.columns(2)
@@ -650,22 +940,7 @@ def main():
                         st.metric("基因数量", adata.n_vars)
                     
                     st.write("**数据形状:**", adata.shape)
-                    
-                    # 数据预览
-                    st.write("**数据预览（前5行5列，仅显示非零值）:**")
-                    if hasattr(adata, 'X') and adata.X is not None:
-                        if hasattr(adata.X, 'toarray'):
-                            preview_data = adata.X[:5, :5].toarray()
-                        else:
-                            preview_data = adata.X[:5, :5]
-                        preview_data[preview_data < 1e-6] = 0
-                        st.dataframe(pd.DataFrame(
-                            preview_data.round(3),
-                            index=adata.obs_names[:5],
-                            columns=adata.var_names[:5]
-                        ))
-                    else:
-                        st.write("❌ 数据矩阵为空")
+                    render_data_preview(adata)
         else:
             # 示例数据加载
             st.write("### 或使用示例数据")
@@ -675,11 +950,13 @@ def main():
                     if adata is not None:
                         st.session_state.adata = adata
                         st.success("✅ 示例数据加载成功！")
+                        cache_hvg_plot(adata)
                         st.rerun()
             
             # 如果已经加载了数据，显示数据信息
             if st.session_state.adata is not None:
                 st.success("✅ 数据已加载！")
+                cache_hvg_plot(st.session_state.adata)
                 
                 # 显示数据基本信息（与上传数据保持一致）
                 col1, col2 = st.columns(2)
@@ -689,22 +966,7 @@ def main():
                     st.metric("基因数量", st.session_state.adata.n_vars)
                 
                 st.write("**数据形状:**", st.session_state.adata.shape)
-                
-                # 数据预览
-                st.write("**数据预览（前5行5列，仅显示非零值）:**")
-                if hasattr(st.session_state.adata, 'X') and st.session_state.adata.X is not None:
-                    if hasattr(st.session_state.adata.X, 'toarray'):
-                        preview_data = st.session_state.adata.X[:5, :5].toarray()
-                    else:
-                        preview_data = st.session_state.adata.X[:5, :5]
-                    preview_data[preview_data < 1e-6] = 0
-                    st.dataframe(pd.DataFrame(
-                        preview_data.round(3),
-                        index=st.session_state.adata.obs_names[:5],
-                        columns=st.session_state.adata.var_names[:5]
-                    ))
-                else:
-                    st.write("❌ 数据矩阵为空")
+                render_data_preview(st.session_state.adata)
     
     elif st.session_state.nav_selected == "分析流程":
         if st.session_state.adata is None:
@@ -766,20 +1028,61 @@ def main():
             </div>
             """, unsafe_allow_html=True)
             
-            # 工具按钮
-            col1, col2, col3 = st.columns(3)
+            st.markdown("### 🔍 高变基因筛选")
+            if st.button("执行高变基因筛选"):
+                if st.session_state.hvg_result is None:
+                    with st.spinner("正在准备高变基因图..."):
+                        cache_hvg_plot(st.session_state.adata)
+                if st.session_state.hvg_result is not None:
+                    st.pyplot(st.session_state.hvg_result["fig"])
+                    stats = st.session_state.hvg_result.get("stats")
+                    if stats:
+                        col1, col2 = st.columns(2)
+                        col1.metric("总基因数", stats["total_genes"])
+                        col2.metric("高变基因数量", stats["n_hvg"])
+                    download_cached_image(st.session_state.hvg_result, "hvg_plot.png", "下载高变基因图")
+                    st.success("高变基因可视化完成。")
+                else:
+                    st.warning("当前数据暂无法生成高变基因图。")
             
-            with col1:
-                if st.button("🔍 高变基因筛选"):
-                    st.info("ℹ️ 高变基因筛选功能暂未开放")
+            st.divider()
+            st.markdown("### 🧬 细胞类型注释")
+            marker_file = st.file_uploader(
+                "上传 marker 文件（需包含 cell_type 与 markers 两列）",
+                type=['csv', 'txt'],
+                key="marker_file_uploader"
+            )
+            if st.button("执行细胞注释"):
+                if marker_file is None:
+                    st.warning("请先上传 marker 文件，再进行注释。")
+                else:
+                    with st.spinner("正在根据 marker 基因评分并注释细胞类型..."):
+                        fig, summary_df = perform_cell_annotation(st.session_state.adata, marker_file)
+                        if fig is not None:
+                            st.pyplot(fig)
+                            create_download_button(fig, "cell_annotation.png", "下载细胞注释图")
+                            if summary_df is not None:
+                                st.write("**细胞注释评分汇总：**")
+                                st.dataframe(summary_df, use_container_width=True)
+                            st.success("细胞类型注释已完成。")
             
-            with col2:
-                if st.button("📊 PCA降维分析"):
-                    st.info("ℹ️ PCA降维分析功能暂未开放")
-            
-            with col3:
-                if st.button("🧬 差异基因分析"):
-                    st.info("ℹ️ 差异基因分析功能暂未开放")
+            st.divider()
+            st.markdown("### 📈 差异基因分析")
+            n_genes = st.slider("每个细胞簇展示的差异基因数量", min_value=5, max_value=30, value=20, step=5)
+            if st.button("执行差异基因分析"):
+                with st.spinner("正在执行差异基因分析..."):
+                    fig_heatmap, fig_summary, marker_genes = perform_differential_expression(st.session_state.adata, n_genes=n_genes)
+                    if fig_heatmap is not None:
+                        st.pyplot(fig_heatmap)
+                        create_download_button(fig_heatmap, "deg_heatmap.png", "下载差异基因热图")
+                    if fig_summary is not None:
+                        st.pyplot(fig_summary)
+                        create_download_button(fig_summary, "deg_top_genes.png", "下载差异基因概览图")
+                    if marker_genes is not None:
+                        st.write("**各簇Top5差异基因：**")
+                        st.dataframe(marker_genes, use_container_width=True)
+                    if fig_heatmap is not None:
+                        st.success("差异基因分析完成。")
     
     elif st.session_state.nav_selected == "历史记录":
         st.markdown("""
